@@ -1,0 +1,12 @@
+[Unit]
+Description=Auto-connect Bluetooth PAN multi-device
+After=bluetooth.target network.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/auto-bt-pan.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
