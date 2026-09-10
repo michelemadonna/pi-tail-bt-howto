@@ -23,6 +23,26 @@ Feel free to contribute improvements or report issues!
 - A Raspberry Pi Zero 2 W running Kali Linux (Pi-Tail image recommended). See [Pi-Tail GitHub](https://github.com/Re4son/RPi-Tweaks/tree/master/pi-tail) for setup instructions and more.
 - A smartphone or PC capable of Bluetooth tethering.
 
+## Quick installation
+
+From the Raspberry Pi, run the installer as the normal user. It downloads the
+current files, installs the Debian dependencies, asks for the PAN device, and
+enables the service only when a valid device has been configured:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/michelemadonna/pi-tail-bt-howto/main/install.sh | bash
+```
+
+For a non-interactive install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/michelemadonna/pi-tail-bt-howto/main/install.sh \
+  | PI_TAIL_DEVICE='AA:BB:CC:DD:EE:FF|iPhone|172.20.10.2|172.20.10.1|1.1.1.1' bash
+```
+
+The installer must not be run with `sudo bash`; it requests sudo only when it
+is ready to install packages and system files.
+
 ## Setup Instructions
 
 1. **Initial Configuration**

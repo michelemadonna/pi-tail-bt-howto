@@ -23,6 +23,7 @@ CONNECT_TIMEOUT="${BLUETOOTH_PAN_CONNECT_TIMEOUT:-20}"
 DHCP_TIMEOUT="${BLUETOOTH_PAN_DHCP_TIMEOUT:-15}"
 PAN_ROUTE_METRIC="${BLUETOOTH_PAN_ROUTE_METRIC:-50}"
 STATIC_PREFIX="${BLUETOOTH_PAN_STATIC_PREFIX:-28}"
+CONFIG_FILE="${BLUETOOTH_PAN_CONFIG:-/etc/default/auto-bt-pan}"
 
 # List of devices in priority order.
 # FORMAT: MAC|TYPE|STATIC_IP|GATEWAY|DNS
@@ -30,6 +31,13 @@ DEVICES=(
     "xx:xx:xx:xx:xx:xx|iPhone|172.20.10.2|172.20.10.1|1.1.1.1"
     "yy:yy:yy:yy:yy:yy|Android|192.168.44.2|192.168.44.1|1.1.1.1"
 )
+
+# The installer writes the real device list here. Keep the repository script
+# usable by itself as well, so validation still rejects unconfigured MACs.
+if [[ -r "$CONFIG_FILE" ]]; then
+    # shellcheck source=/dev/null
+    source "$CONFIG_FILE"
+fi
 
 ACTIVE_MAC=""
 ACTIVE_IFACE=""
