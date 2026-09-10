@@ -83,7 +83,8 @@ Feel free to contribute improvements or report issues!
    Ensure that BlueZ and other necessary packages are installed on your Raspberry Pi:
    
    ```bash
-   sudo apt install bluez bluez-tools bluetooth blueman pulseaudio-module-bluetooth -y
+   sudo apt install bluez bluez-tools bluetooth blueman pulseaudio-module-bluetooth \
+       python3-dbus python3-gi isc-dhcp-client -y
    ```
 
 3. **Pair Your Devices**
@@ -137,11 +138,17 @@ Feel free to contribute improvements or report issues!
    quit
    ```
 
-4. **Create the Bluetooth PAN Client Script**
-   Create the script that will handle the Bluetooth PAN connection:
-   
+4. **Install the Bluetooth PAN Client**
+   Install the supervisor, its BlueZ D-Bus helper, and the DHCP hook:
+
    ```bash
    sudo cp ./auto-bt-pan.sh /usr/local/bin/auto-bt-pan.sh
+   sudo install -d -m 755 /usr/local/libexec
+   sudo cp ./bluez-pan-connect.py /usr/local/libexec/bluez-pan-connect.py
+   sudo cp ./auto-bt-pan-dhclient-script /usr/local/libexec/auto-bt-pan-dhclient-script
+   sudo chmod +x /usr/local/bin/auto-bt-pan.sh \
+       /usr/local/libexec/bluez-pan-connect.py \
+       /usr/local/libexec/auto-bt-pan-dhclient-script
    ```
    
    Modify the following content regarding your devices in `/usr/local/bin/auto-bt-pan.sh`:
@@ -155,11 +162,15 @@ Feel free to contribute improvements or report issues!
    )
    ```
    
-   Make the script executable:
-   
+   The devices are tried in the order listed in `DEVICES`. The format is:
+
    ```bash
-   sudo chmod +x /usr/local/bin/auto-bt-pan.sh
+   MAC|TYPE|STATIC_IP|GATEWAY|DNS
    ```
+
+   DHCP is attempted first. `STATIC_IP` is used as a fallback with a `/28`
+   prefix by default; override it with `BLUETOOTH_PAN_STATIC_PREFIX` if the
+   tethering network uses another prefix.
 
 5. **Create Systemd Service**
    Create a systemd service to manage the Bluetooth connection:
@@ -172,8 +183,8 @@ Feel free to contribute improvements or report issues!
    Enable and start the Bluetooth PAN client service:
    
    ```bash
-   sudo systemctl enable auto-bt-pan.service
-   sudo systemctl start auto-bt-pan.service
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now auto-bt-pan.service
    ```
 
 7. **Reboot and Test**
@@ -186,8 +197,9 @@ Feel free to contribute improvements or report issues!
    After reboot, check if the Bluetooth PAN connection is established and if you have internet access:
    
    ```bash
-   ifconfig bnep0
-   ping -c 4 google.com 
+   ip -br address
+   ip route
+   ping -c 4 google.com
    ```
 
 ## Troubleshooting
@@ -200,84 +212,98 @@ Check the status of the systemd service:
   sudo systemctl status auto-bt-pan.service
   ```
 
-- Review logs for errors:
+- Review logs for errors and reconnection events:
   
   ```bash
-  journalctl -u auto-bt-pan.service
+  journalctl -u auto-bt-pan.service -f
   ```
 
-## Bonus 1 : Connect via USB on MacOS
+## Bonus 1: USB Gadget Bootstrap on macOS
 
-To connect a Raspberry Pi Zero 2 W to a Mac via USB and use it for SSH over a single USB cable, you need to enable USB OTG gadget mode on the Pi and configure both the SD card and macOS.
+The package can configure USB gadget mode on a Pi-Tail installation when the
+Mac can modify only the FAT boot partition. The first boot uses an ifupdown
+`up` hook attached to `lo`; the hook installs the runtime files into the real
+Kali root, starts the gadget immediately, and removes itself.
 
-1. What you need
-   
-   - A data micro‑USB cable (not charge‑only), plugged into the Pi’s USB data port (the inner one, not “PWR IN”) and into your Mac.
+This method leaves the normal systemd boot sequence unchanged.
 
-2. Edit files on the SD card
-   
-   - Mount the SD card’s boot partition on the Mac (it may be named “boot” or “bootfs”).
-   
-   - Replace config.txt with config.eth
-     
-     ```bash
-     mv /Volumes/boot/config.eth /Volumes/boot/config.txt
-     ```
-   
-   - Edit interfaces file
-     
-     ```bash
-     nano /Volumes/boot/etc/network/interfaces
-     ```
-     
-     Add the following lines at the end of the file:
-     
-     ```
-     allow-hotplug usb0
-     iface usb0 inet static
-     address 192.168.2.3
-     netmask 255.255.255.0
-     gateway 192.168.2.1
-     ```
-   
-   - Eject the SD card, insert it into the Pi.
+### Clean installation from a fresh Pi-Tail image
 
-3. First boot of the Pi over USB
-   
-   - Connect the Pi’s USB data port to the Mac with the micro‑USB cable.
-   
-   - TThe Pi will power from the Mac and expose itself as a USB Ethernet (RNDIS/Ethernet Gadget) network interface, and a yellow dot will appear next to the new USB network interface in macOS Network settings to indicate limited or no internet connectivity.
-     
-     ![1.png](static/1.png)
+Use this procedure when starting from a newly flashed Pi-Tail SD card. It
+does not require SSH access or any pre-existing USB gadget installation.
 
-4. Configure macOS networking
-   Once the Pi has booted in gadget mode:
-   Open **System Preferences** > **Network**. A new **RNDIS/Ethernet Gadget** interface should appear.
-   
-   Click **Details** and configure:
-   
-   - **TCP/IP Tab:**
-     
-     - Configure IPv4: **Manually**
-     
-     - IP Address: `192.168.2.2`
-     
-     - Subnet Mask: `255.255.255.0`
-     
-     - Router: `192.168.2.1`
-       
-       ![2.png](static/2.png)
-   
-   - **DNS Tab:**
-     
-     - DNS Servers: `192.168.2.1` or `1.1.1.1`
-       
-       ![3.png](static/3.png)
-   
-   Now the RNDIS/Ethernet Gadget will appears as connected (green dot)
-   
-   ![4.png](static/4.png)
+1. Flash the Pi-Tail image to the SD card and mount its FAT boot partition on
+   the Mac, for example as `/Volumes/bootfs`. Do not boot the card yet.
 
-5. **Set Network Service Order** Ensure your network service order has **Wi-Fi** or **Ethernet** listed **above** the **RNDIS/Ethernet Gadget** connection. You can adjust this in **System Preferences** > **Network** > **...** > **Set Service Order**.
+2. Copy the package files to the root of the boot partition:
 
-After configuration, you should be able to SSH to your Pi at `192.168.2.3`.
+   ```bash
+   BOOT=/Volumes/bootfs
+
+   cp ./install-usb-gadget.sh "$BOOT/install-usb-gadget.sh"
+   cp ./usb-gadget "$BOOT/usb-gadget"
+   cp ./usb-gadget.service "$BOOT/usb-gadget.service"
+   cp ./usb-gadget.conf "$BOOT/usb-gadget.conf"
+   ```
+
+3. Edit `$BOOT/cmdline.txt`. Keep it as one line and remove any old
+   `g_ether`, `g_ether.host_addr=...`, and `g_ether.dev_addr=...` tokens. If
+   `modules-load=` contains `g_ether`, leave only the other modules, normally:
+
+   ```text
+   modules-load=dwc2
+   ```
+
+4. Edit `$BOOT/interfaces` and ensure the loopback stanza contains this hook:
+
+   ```text
+   auto lo
+   iface lo inet loopback
+       up /bin/bash /boot/firmware/install-usb-gadget.sh --offline-firstboot || true
+   ```
+
+   Add the hook only once. Do not add a second USB network stanza; the
+   `usb-gadget` script configures the USB interface itself.
+
+5. Eject the SD card cleanly, insert it into the Pi, and connect the USB data
+   port to the Mac. During this first boot, Pi-Tail copies `interfaces`, raises
+   `lo`, and runs the installer. The installer copies the runtime script and
+   service into the root filesystem, removes the hook, reloads systemd, enables
+   and starts `usb-gadget.service`, and writes its one-shot marker.
+
+6. Configure the new USB Ethernet interface on macOS as `192.168.2.2` with
+   subnet mask `255.255.255.0`. The default Pi address is `192.168.2.3`.
+
+7. Verify the installation over USB:
+
+   ```bash
+   ssh kali@192.168.2.3
+   sudo systemctl is-active usb-gadget.service
+   sudo test -e /var/lib/usb-gadget/.offline-firstboot-installed
+   ```
+
+   With boot storage enabled, the service exports the boot partition to the
+   host and it is no longer mounted locally. `usb-gadget.conf` remains on that
+   boot partition and is read when the service starts.
+
+### Configure macOS
+
+After the Pi has booted, macOS should show a new USB Ethernet interface. Set
+its IPv4 address manually to `192.168.2.2` with subnet mask
+`255.255.255.0`. The Pi uses `192.168.2.3` by default, as configured in
+`usb-gadget.conf`.
+
+Keep Wi-Fi or the normal Ethernet service above the USB gadget in macOS
+Network Service Order. You can then connect with:
+
+```bash
+ssh kali@192.168.2.3
+```
+
+To inspect the first-boot result on the Pi:
+
+```bash
+sudo systemctl status usb-gadget.service
+sudo test -e /var/lib/usb-gadget/.offline-firstboot-installed
+sudo journalctl -u usb-gadget.service --no-pager
+```

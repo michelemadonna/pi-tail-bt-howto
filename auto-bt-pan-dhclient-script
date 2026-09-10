@@ -1,0 +1,92 @@
+#!/bin/sh
+
+# dhclient hook for the PAN supervisor.  It configures only the address;
+# routes and DNS are deliberately owned by auto-bt-pan.sh.
+
+mask_to_prefix() {
+    old_ifs=$IFS
+    IFS=.
+    # shellcheck disable=SC2086
+    set -- $1
+    IFS=$old_ifs
+
+    [ "$#" -eq 4 ] || return 1
+
+    prefix=0
+    partial=0
+    for octet in "$@"; do
+        case "$octet" in
+            255)
+                [ "$partial" -eq 0 ] || return 1
+                prefix=$((prefix + 8))
+                ;;
+            254)
+                [ "$partial" -eq 0 ] || return 1
+                prefix=$((prefix + 7))
+                partial=1
+                ;;
+            252)
+                [ "$partial" -eq 0 ] || return 1
+                prefix=$((prefix + 6))
+                partial=1
+                ;;
+            248)
+                [ "$partial" -eq 0 ] || return 1
+                prefix=$((prefix + 5))
+                partial=1
+                ;;
+            240)
+                [ "$partial" -eq 0 ] || return 1
+                prefix=$((prefix + 4))
+                partial=1
+                ;;
+            224)
+                [ "$partial" -eq 0 ] || return 1
+                prefix=$((prefix + 3))
+                partial=1
+                ;;
+            192)
+                [ "$partial" -eq 0 ] || return 1
+                prefix=$((prefix + 2))
+                partial=1
+                ;;
+            128)
+                [ "$partial" -eq 0 ] || return 1
+                prefix=$((prefix + 1))
+                partial=1
+                ;;
+            0)
+                partial=1
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+    done
+
+    printf '%s\n' "$prefix"
+}
+
+interface=${interface:-}
+new_ip_address=${new_ip_address:-}
+new_subnet_mask=${new_subnet_mask:-}
+
+case "${reason:-}" in
+    PREINIT)
+        ip link set dev "$interface" up
+        ip -4 addr flush dev "$interface" scope global
+        ;;
+
+    BOUND|RENEW|REBIND|REBOOT)
+        prefix="$(mask_to_prefix "${new_subnet_mask:-}")" || exit 1
+        ip -4 addr replace "${new_ip_address}/${prefix}" dev "$interface"
+        ip link set dev "$interface" up
+        ;;
+
+    EXPIRE|FAIL|RELEASE|STOP)
+        # Cleanup is intentionally performed by the supervisor, which owns
+        # the interface lifecycle and its route/DNS state.
+        ;;
+esac
+
+exit 0
