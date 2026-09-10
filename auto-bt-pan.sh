@@ -233,7 +233,7 @@ on_exit() {
 
 
 on_signal() {
-    log "[INFO] Stop richiesto"
+    log "[INFO] Stop requested"
     exit 0
 }
 
@@ -279,13 +279,13 @@ configure_ip() {
         "$iface"; then
         ip_address="$(ip -4 -o addr show dev "$iface" scope global | awk 'NR == 1 { print $4 }')"
         if [[ -n "$ip_address" ]]; then
-            log "[INFO] DHCP configurato su $iface: $ip_address"
+            log "[INFO] DHCP configured on $iface: $ip_address"
         else
-            warn "DHCP terminato senza un indirizzo su $iface"
+            warn "DHCP completed without assigning an address on $iface"
             ip -4 addr add "$static_ip/$STATIC_PREFIX" dev "$iface"
         fi
     else
-        warn "DHCP fallito su $iface; uso configurazione statica $static_ip/$STATIC_PREFIX"
+        warn "DHCP failed on $iface; using static configuration $static_ip/$STATIC_PREFIX"
         ip -4 addr replace "$static_ip/$STATIC_PREFIX" dev "$iface"
     fi
 
@@ -296,11 +296,11 @@ configure_ip() {
 
     if command -v resolvectl >/dev/null 2>&1; then
         resolvectl dns "$iface" "$dns" >/dev/null 2>&1 ||
-            warn "impossibile configurare DNS su $iface con resolvectl"
+            warn "unable to configure DNS on $iface with resolvectl"
         resolvectl domain "$iface" '~.' >/dev/null 2>&1 ||
-            warn "impossibile assegnare il dominio DNS globale a $iface"
+            warn "unable to assign the global DNS domain to $iface"
     else
-        log "[INFO] resolvectl non disponibile: /etc/resolv.conf non viene modificato"
+        log "[INFO] resolvectl unavailable: /etc/resolv.conf will not be modified"
     fi
 
     ping -I "$iface" -c 1 -W 2 "$gateway" >/dev/null 2>&1
@@ -314,33 +314,33 @@ attempt_device() {
 
     parse_device "$entry" || return 1
 
-    log "[INFO] Provo $TYPE ($MAC) in ordine di priorità"
+    log "[INFO] Trying $TYPE ($MAC) in priority order"
 
     if ! iface="$("$HELPER" connect \
         "$MAC" \
         --profile "$PAN_PROFILE" \
         --timeout "$CONNECT_TIMEOUT")"; then
         delay="$(retry_delay "$MAC")"
-        warn "connessione PAN fallita per $TYPE; nuovo tentativo tra ${delay}s"
+        warn "PAN connection failed for $TYPE; retrying in ${delay}s"
         sleep "$delay"
         return 1
     fi
 
     iface="${iface##*$'\n'}"
     [[ "$iface" =~ ^[[:alnum:]_.-]+$ ]] || {
-        warn "BlueZ ha restituito un nome interfaccia non valido: $iface"
+        warn "BlueZ returned an invalid interface name: $iface"
         "$HELPER" disconnect "$MAC" >/dev/null 2>&1 || true
         return 1
     }
 
     if ! wait_for_interface "$iface"; then
-        warn "interfaccia PAN non disponibile: $iface"
+        warn "PAN interface is unavailable: $iface"
         "$HELPER" disconnect "$MAC" >/dev/null 2>&1 || true
         return 1
     fi
 
     if ! configure_ip "$iface" "$STATIC_IP" "$GATEWAY" "$DNS"; then
-        warn "gateway $GATEWAY non raggiungibile su $iface"
+        warn "gateway $GATEWAY is unreachable on $iface"
         ACTIVE_MAC="$MAC"
         ACTIVE_IFACE="$iface"
         ACTIVE_GATEWAY="$GATEWAY"
@@ -355,7 +355,7 @@ attempt_device() {
     ACTIVE_GATEWAY="$GATEWAY"
     reset_retry "$MAC"
 
-    log "[INFO] PAN attiva: $TYPE su $iface, gateway $GATEWAY"
+    log "[INFO] PAN active: $TYPE on $iface, gateway $GATEWAY"
 
     "$HELPER" watch \
         "$MAC" \
@@ -370,7 +370,7 @@ attempt_device() {
 monitor_active() {
     while [[ -n "$WATCH_PID" ]] && kill -0 "$WATCH_PID" 2>/dev/null; do
         if ! ip link show dev "$ACTIVE_IFACE" >/dev/null 2>&1; then
-            warn "interfaccia $ACTIVE_IFACE scomparsa"
+            warn "interface $ACTIVE_IFACE disappeared"
             return 1
         fi
 
@@ -389,7 +389,7 @@ trap on_exit EXIT
 trap on_signal INT TERM
 
 validate_configuration
-log "[INFO] Supervisore Bluetooth PAN avviato"
+log "[INFO] Bluetooth PAN supervisor started"
 
 while :; do
     connected=no
@@ -398,7 +398,7 @@ while :; do
         if attempt_device "$entry"; then
             connected=yes
             monitor_active || true
-            log "[WARN] Connessione PAN persa; pulizia e failover"
+            log "[WARN] PAN connection lost; cleaning up and failing over"
             cleanup_active
             break
         fi

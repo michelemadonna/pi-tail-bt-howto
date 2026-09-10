@@ -9,11 +9,16 @@ It transforms the compact Raspberry Pi into a **“tail”** device that can be 
 The official Pi-Tail setup typically configures Bluetooth in “server” mode: the Raspberry Pi acts as a Bluetooth access point, allowing your smartphone or PC to pair and connect to it, sharing the host’s internet connection with the Pi via Bluetooth PAN (Personal Area Network).
 This repository provides a reverse Bluetooth configuration: the Raspberry Pi acts as the client, actively connecting to your paired smartphone or PC. This approach offers greater reliability in certain scenarios, as it allows the Pi to automatically establish the connection on boot and better handle internet sharing from the host device.
 
+`auto-bt-pan` has been tested on Kali Linux Pi-Tail running on a Raspberry Pi
+Zero 2 W. It can be adapted to other Raspberry Pi distributions when they
+provide the required BlueZ, systemd, iproute2, DHCP client, and Python D-Bus
+components.
+
 Key Benefits of This Reverse Setup
 
 * Seamless Internet Sharing: The Pi reliably obtains internet access from your phone/PC without manual intervention after initial pairing.
 * Systemd Integration: Includes a custom systemd service script to manage the Bluetooth connection automatically at boot.
-* Muliple Device Support: Easily configure the Pi to connect to multiple devices (e.g., both an iPhone and an Android phone) with prioritized connection attempts.
+* Multiple Device Support: Easily configure the Pi to connect to multiple devices (e.g., both an iPhone and an Android phone) with prioritized connection attempts.
 
 This setup is particularly useful for cybersecurity students and professionals needing a discreet, portable Kali environment with consistent network access via Bluetooth tethering.
 Feel free to contribute improvements or report issues!
@@ -23,15 +28,153 @@ Feel free to contribute improvements or report issues!
 - A Raspberry Pi Zero 2 W running Kali Linux (Pi-Tail image recommended). See [Pi-Tail GitHub](https://github.com/Re4son/RPi-Tweaks/tree/master/pi-tail) for setup instructions and more.
 - A smartphone or PC capable of Bluetooth tethering.
 
-## Quick installation
+## Initial system setup
 
-From the Raspberry Pi, run the installer as the normal user. It downloads the
-current files, installs the Debian dependencies, asks for the PAN device, and
-enables the service only when a valid device has been configured:
+Complete the basic Kali setup before pairing or installing the Bluetooth PAN
+service. Connect to the Raspberry Pi through SSH or a local terminal. The
+default Pi-Tail credentials are `kali` / `kali`; change the password immediately:
+
+```bash
+passwd
+```
+
+Update the system:
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+```
+
+Set a recognizable hostname, replacing `printer-pi` if desired:
+
+```bash
+sudo hostnamectl set-hostname printer-pi
+```
+
+Review the hosts file:
+
+```bash
+sudo nano /etc/hosts
+```
+
+Configure DNS resolution in `/etc/resolv.conf`:
+
+```bash
+sudo nano /etc/resolv.conf
+```
+
+Add or update these entries:
+
+```text
+nameserver 1.1.1.1
+nameserver 9.9.9.9
+```
+
+If `/etc/resolv.conf` is a symbolic link managed by another resolver, edit the
+file it points to or configure that resolver instead of replacing the link.
+
+Enable Avahi for local service discovery:
+
+```bash
+sudo systemctl enable avahi-daemon
+sudo systemctl start avahi-daemon
+```
+
+## Before installation
+
+Complete these steps on the Raspberry Pi before running the installer:
+
+1. Boot Kali and connect to the Pi through SSH or a local terminal. The Pi
+   needs temporary Internet access so `apt` can install the dependencies.
+2. Enable tethering on the phone or computer that will provide the PAN link.
+   Bluetooth tethering must be enabled during pairing and whenever you test
+   the connection.
+3. Pair and trust every device you want the Pi to use. The installer does not
+   perform pairing for you.
+4. Note the Bluetooth MAC address of each paired device.
+
+Do not run the installer with `sudo bash`. Run it as the normal user; it asks
+for sudo only when it is ready to install packages and system files. Do not
+install the files manually and do not edit `/usr/local/bin/auto-bt-pan.sh`
+after installation. Device configuration belongs in
+`/etc/default/auto-bt-pan`.
+
+## Pair and trust a device
+
+Enable tethering before pairing.
+
+On an **iPhone**:
+
+1. Open **Settings > Personal Hotspot**.
+2. Enable **Allow Others to Join**.
+3. Enable **Maximize Compatibility** when available.
+4. Make sure Bluetooth is enabled.
+
+On **Android**:
+
+1. Open **Settings > Network & Internet > Hotspot & tethering**. The exact
+   menu name may differ by Android version or manufacturer.
+2. Enable **Bluetooth tethering**.
+3. Make sure Bluetooth is enabled and keep tethering enabled during pairing.
+
+On a **PC**, enable Bluetooth and configure the system's Bluetooth PAN or
+Internet Sharing feature before pairing.
+
+On the Raspberry Pi, run:
+
+```bash
+bluetoothctl
+```
+
+Then enter:
+
+```text
+power on
+agent on
+default-agent
+scan on
+```
+
+When the device appears, note its MAC address and run:
+
+```text
+pair AA:BB:CC:DD:EE:FF
+trust AA:BB:CC:DD:EE:FF
+info AA:BB:CC:DD:EE:FF
+```
+
+Continue only when `info` shows `Paired: yes` and `Trusted: yes`. Repeat this
+procedure for every device you want to configure. Then stop scanning and exit:
+
+```text
+scan off
+quit
+```
+
+## Install
+
+Run the installer as the normal user. It installs the dependencies and service,
+then asks for the first device configuration:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/michelemadonna/pi-tail-bt-howto/main/install.sh | bash
 ```
+
+At the prompt enter one line in this format:
+
+```text
+MAC|TYPE|STATIC_IP|GATEWAY|DNS
+```
+
+Example:
+
+```text
+AA:BB:CC:DD:EE:FF|iPhone|172.20.10.2|172.20.10.1|1.1.1.1
+```
+
+The installer starts the service only after a valid device has been provided.
+DHCP is attempted first; `STATIC_IP` is the fallback address and uses `/28` by
+default.
 
 For a non-interactive install:
 
@@ -40,187 +183,53 @@ curl -fsSL https://raw.githubusercontent.com/michelemadonna/pi-tail-bt-howto/mai
   | PI_TAIL_DEVICE='AA:BB:CC:DD:EE:FF|iPhone|172.20.10.2|172.20.10.1|1.1.1.1' bash
 ```
 
-The installer must not be run with `sudo bash`; it requests sudo only when it
-is ready to install packages and system files.
+## Add another device
 
-## Setup Instructions
+Pair and trust the new device first, then edit the configuration:
 
-1. **Initial Configuration**
-   access your Raspberry Pi via SSH or terminal and perform initial updates and configurations (default username: kali, password: kali):
-   
-   ```bash
-   sudo apt update
-   sudo apt upgrade -y
-   ```
-   
-   change the hostname to a more understandable name for easier identification:
-   
-   ```bash
-   sudo hostnamectl set-hostname printer-pi
-   ```
-   
-   edit the hosts file and systemd resolved configuration to ensure proper DNS resolution:
-   
-   ```bash
-   sudo nano /etc/hosts
-   ```
-   
-   change the dns server settings:
-   
-   ```bash
-   sudo nano /etc/systemd/resolved.conf
-   ```
-   
-   Add or modify the following lines:
-   
-   ```
-   [Resolve]
-   DNS=1.1.1.1
-   FallbackDNS=9.9.9.9
-   ```
-   
-   Restart the systemd-resolved service to apply changes:
-   
-   ```bash
-   sudo systemctl restart systemd-resolved
-   resolvectl status
-   ```
-   
-   Enable and start the Avahi daemon for network service discovery:
-   
-   ```bash
-   sudo systemctl enable avahi-daemon
-   sudo systemctl start avahi-daemon
-   ```
-   
-   change the default password for security:
-   
-   ```bash
-   passwd
-   ```
+```bash
+sudo nano /etc/default/auto-bt-pan
+```
 
-2. **Install Required Packages**
-   Ensure that BlueZ and other necessary packages are installed on your Raspberry Pi:
-   
-   ```bash
-   sudo apt install bluez bluez-tools bluetooth blueman pulseaudio-module-bluetooth \
-       python3-dbus python3-gi isc-dhcp-client -y
-   ```
+Add one quoted entry per device:
 
-3. **Pair Your Devices**
-   
-   > ⚠️ **Important:** Before proceeding with Bluetooth pairing, make sure that Internet Sharing (tethering) is enabled on your smartphone.
-   
-   - **iPhone:**
-     
-     1. Go to **Settings** > **Personal Hotspot**.
-     2. Toggle **Allow Others to Join** to ON.
-     3. Ensure **Maximize Compatibility** is enabled for easier connection.
-     4. Bluetooth must be ON.
-   
-   - **Android:**
-     
-     1. Go to **Settings** > **Network & Internet** > **Hotspot & tethering**.
-     2. Enable **Bluetooth tethering**.
-     3. Make sure Bluetooth is ON.
-   
-   Once Internet Sharing is active, you can proceed with Bluetooth pairing.
-   
-   Use `bluetoothctl` to pair your Raspberry Pi with your smartphone or PC:
-   
-   ```bash
-   bluetoothctl
-   ```
-   
-   Inside the `bluetoothctl` prompt, use the following commands:
-   
-   ```bash
-   power on
-   agent on
-   default-agent
-   scan on
-   ```
-   
-   Once you see your device, note its MAC address and pair:
-   
-   ```
-   pair XX:XX:XX:XX:XX:XX
-   trust XX:XX:XX:XX:XX:XX
-   ```
-   
-   Replace `XX:XX:XX:XX:XX:XX` with your device's MAC address. 
-   You may be prompted to confirm the pairing on your smartphone. Accept the pairing request.
-   Pair other devices if needed by repeating the above steps.
-   Finally, stop scanning and exit:
-   
-   ```
-   scan off
-   quit
-   ```
+```bash
+DEVICES=(
+    'AA:BB:CC:DD:EE:FF|iPhone|172.20.10.2|172.20.10.1|1.1.1.1'
+    '11:22:33:44:55:66|Android|192.168.44.2|192.168.44.1|1.1.1.1'
+)
+```
 
-4. **Install the Bluetooth PAN Client**
-   Install the supervisor, its BlueZ D-Bus helper, and the DHCP hook:
+The order is the priority order: the first device is always tried first, and
+the next device is used only after the active connection fails. Keep each
+device's IP range and gateway consistent with that device's Bluetooth
+tethering network. After saving the file, restart the service:
 
-   ```bash
-   sudo cp ./auto-bt-pan.sh /usr/local/bin/auto-bt-pan.sh
-   sudo install -d -m 755 /usr/local/libexec
-   sudo cp ./bluez-pan-connect.py /usr/local/libexec/bluez-pan-connect.py
-   sudo cp ./auto-bt-pan-dhclient-script /usr/local/libexec/auto-bt-pan-dhclient-script
-   sudo chmod +x /usr/local/bin/auto-bt-pan.sh \
-       /usr/local/libexec/bluez-pan-connect.py \
-       /usr/local/libexec/auto-bt-pan-dhclient-script
-   ```
-   
-   Modify the following content regarding your devices in `/usr/local/bin/auto-bt-pan.sh`:
-   
-   ```bash
-   # List of devices in priority order
-   # FORMAT: MAC|TYPE|STATIC_IP|GATEWAY|DNS
-   DEVICES=(
-   "xx:xx:xx:xx:xx:xx|iPhone|172.20.10.2|172.20.10.1|1.1.1.1"
-   "yy:yy:yy:yy:yy:yy|Android|192.168.44.2|192.168.44.1|1.1.1.1"
-   )
-   ```
-   
-   The devices are tried in the order listed in `DEVICES`. The format is:
+```bash
+sudo systemctl restart auto-bt-pan.service
+```
 
-   ```bash
-   MAC|TYPE|STATIC_IP|GATEWAY|DNS
-   ```
+No script copy or manual package installation is needed when adding devices.
 
-   DHCP is attempted first. `STATIC_IP` is used as a fallback with a `/28`
-   prefix by default; override it with `BLUETOOTH_PAN_STATIC_PREFIX` if the
-   tethering network uses another prefix.
+## Test the connection
 
-5. **Create Systemd Service**
-   Create a systemd service to manage the Bluetooth connection:
-   
-   ```bash
-   sudo cp ./auto-bt-pan.service /etc/systemd/system/auto-bt-pan.service
-   ```
+```bash
+sudo systemctl status auto-bt-pan.service
+sudo journalctl -fu auto-bt-pan.service
+ip -br address
+ip route
+ping -c 4 google.com
+```
 
-6. **Enable and Start the Service**
-   Enable and start the Bluetooth PAN client service:
-   
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now auto-bt-pan.service
-   ```
+## Optional USB gadget mode
 
-7. **Reboot and Test**
-   Reboot your Raspberry Pi to apply all changes:
-   
-   ```bash
-   sudo reboot
-   ```
-   
-   After reboot, check if the Bluetooth PAN connection is established and if you have internet access:
-   
-   ```bash
-   ip -br address
-   ip route
-   ping -c 4 google.com
-   ```
+If you also want to use the Raspberry Pi as a USB gadget, follow the dedicated
+configuration guide in [`rpi-configfs-usb-gadget`](https://github.com/michelemadonna/rpi-configfs-usb-gadget).
+
+This repository manages reverse Bluetooth PAN connectivity; the linked
+repository manages the USB ConfigFS gadget setup. Configure USB gadget mode
+separately and avoid enabling conflicting gadget configurations at the same
+time.
 
 ## Troubleshooting
 
@@ -233,97 +242,7 @@ Check the status of the systemd service:
   ```
 
 - Review logs for errors and reconnection events:
-  
+
   ```bash
   journalctl -u auto-bt-pan.service -f
   ```
-
-## Bonus 1: USB Gadget Bootstrap on macOS
-
-The package can configure USB gadget mode on a Pi-Tail installation when the
-Mac can modify only the FAT boot partition. The first boot uses an ifupdown
-`up` hook attached to `lo`; the hook installs the runtime files into the real
-Kali root, starts the gadget immediately, and removes itself.
-
-This method leaves the normal systemd boot sequence unchanged.
-
-### Clean installation from a fresh Pi-Tail image
-
-Use this procedure when starting from a newly flashed Pi-Tail SD card. It
-does not require SSH access or any pre-existing USB gadget installation.
-
-1. Flash the Pi-Tail image to the SD card and mount its FAT boot partition on
-   the Mac, for example as `/Volumes/bootfs`. Do not boot the card yet.
-
-2. Copy the package files to the root of the boot partition:
-
-   ```bash
-   BOOT=/Volumes/bootfs
-
-   cp ./install-usb-gadget.sh "$BOOT/install-usb-gadget.sh"
-   cp ./usb-gadget "$BOOT/usb-gadget"
-   cp ./usb-gadget.service "$BOOT/usb-gadget.service"
-   cp ./usb-gadget.conf "$BOOT/usb-gadget.conf"
-   ```
-
-3. Edit `$BOOT/cmdline.txt`. Keep it as one line and remove any old
-   `g_ether`, `g_ether.host_addr=...`, and `g_ether.dev_addr=...` tokens. If
-   `modules-load=` contains `g_ether`, leave only the other modules, normally:
-
-   ```text
-   modules-load=dwc2
-   ```
-
-4. Edit `$BOOT/interfaces` and ensure the loopback stanza contains this hook:
-
-   ```text
-   auto lo
-   iface lo inet loopback
-       up /bin/bash /boot/firmware/install-usb-gadget.sh --offline-firstboot || true
-   ```
-
-   Add the hook only once. Do not add a second USB network stanza; the
-   `usb-gadget` script configures the USB interface itself.
-
-5. Eject the SD card cleanly, insert it into the Pi, and connect the USB data
-   port to the Mac. During this first boot, Pi-Tail copies `interfaces`, raises
-   `lo`, and runs the installer. The installer copies the runtime script and
-   service into the root filesystem, removes the hook, reloads systemd, enables
-   and starts `usb-gadget.service`, and writes its one-shot marker.
-
-6. Configure the new USB Ethernet interface on macOS as `192.168.2.2` with
-   subnet mask `255.255.255.0`. The default Pi address is `192.168.2.3`.
-
-7. Verify the installation over USB:
-
-   ```bash
-   ssh kali@192.168.2.3
-   sudo systemctl is-active usb-gadget.service
-   sudo test -e /var/lib/usb-gadget/.offline-firstboot-installed
-   ```
-
-   With boot storage enabled, the service exports the boot partition to the
-   host and it is no longer mounted locally. `usb-gadget.conf` remains on that
-   boot partition and is read when the service starts.
-
-### Configure macOS
-
-After the Pi has booted, macOS should show a new USB Ethernet interface. Set
-its IPv4 address manually to `192.168.2.2` with subnet mask
-`255.255.255.0`. The Pi uses `192.168.2.3` by default, as configured in
-`usb-gadget.conf`.
-
-Keep Wi-Fi or the normal Ethernet service above the USB gadget in macOS
-Network Service Order. You can then connect with:
-
-```bash
-ssh kali@192.168.2.3
-```
-
-To inspect the first-boot result on the Pi:
-
-```bash
-sudo systemctl status usb-gadget.service
-sudo test -e /var/lib/usb-gadget/.offline-firstboot-installed
-sudo journalctl -u usb-gadget.service --no-pager
-```
